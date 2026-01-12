@@ -1,118 +1,97 @@
 import os
 import asyncio
+import threading
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from drive_upload import upload_file_bytes
+
 from queue_manager import UploadQueue
+from dashboard import app, bind_queue
+import uvicorn
 
-
-TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TOKEN = os.environ["BOT_TOKEN"]
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 
 queue = UploadQueue(concurrency=3)
+bind_queue(queue)
 
+
+async def upload_handler(item):
+    # 👇 your actual upload logic goes here
+    await asyncio.sleep(1)
+
+
+# ======================
+# Telegram Commands
+# ======================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Send files — they will be queued and uploaded.")
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "✨ Cloud Bulk Google Drive Bot\n\n"
-        "Commands:\n"
-        "/upload_channel <channel> <count>\n"
-        "— Upload 1–1000 recent files from channel\n\n"
-        "Send any file to upload individually."
+        f"📊 Bot Stats\n\n"
+        f"Pending: {queue.pending()}\n"
+        f"Uploaded: {queue.total_uploaded}\n"
+        f"Failed: {queue.total_failed}\n"
+        f"Paused: {queue.paused}"
     )
 
 
-async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file_obj = None
-    file_name = "file"
-
-    if update.message.document:
-        file_obj = await update.message.document.get_file()
-        file_name = update.message.document.file_name
-
-    elif update.message.video:
-        file_obj = await update.message.video.get_file()
-        file_name = "video.mp4"
-
-    elif update.message.photo:
-        file_obj = await update.message.photo[-1].get_file()
-        file_name = "photo.jpg"
-
-    else:
-        await update.message.reply_text("Send a file/video/photo.")
+async def pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
-
-    file_bytes = await file_obj.download_as_bytearray()
-
-    uploaded = upload_file_bytes(file_name, bytes(file_bytes))
-
-    await update.message.reply_text(f"Uploaded:\n{uploaded['webViewLink']}")
+    queue.pause()
+    await update.message.reply_text("⏸ Queue paused")
 
 
-# ---------------- BULK UPLOAD -----------------
-
-async def upload_single_message(msg, chat, update):
-    try:
-        file = await msg.get_file()
-
-        if msg.video:
-            name = f"{chat}_video_{msg.id}.mp4"
-        elif msg.photo:
-            name = f"{chat}_photo_{msg.id}.jpg"
-        elif msg.document:
-            name = msg.document.file_name or f"{chat}_document_{msg.id}"
-        else:
-            return
-
-        file_bytes = await file.download_as_bytearray()
-
-        uploaded = upload_file_bytes(name, bytes(file_bytes))
-
-        await update.message.reply_text(f"Uploaded: {name}")
-    except Exception as e:
-        await update.message.reply_text(f"Retrying {msg.id}…")
-        await upload_single_message(msg, chat, update)
-
-
-async def upload_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2:
-        await update.message.reply_text("Usage:\n/upload_channel <channel> <1-1000>")
+async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
+    queue.resume()
+    await update.message.reply_text("▶ Queue resumed")
 
-    channel = context.args[0]
-    limit = int(context.args[1])
 
-    if limit < 1 or limit > 1000:
-        await update.message.reply_text("Limit must be 1–1000")
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
-
-    chat = await context.bot.get_chat(channel)
-
-    messages = []
-    async for msg in context.bot.get_chat_history(chat.id, limit=limit):
-        messages.append(msg)
-
-    messages = list(reversed(messages))
-
-    await update.message.reply_text(f"Found {len(messages)} messages. Starting upload…")
-
-    async def handler(item):
-        await upload_single_message(item, channel, update)
-
-    await queue.start(handler)
-
-    for m in messages:
-        await queue.push(m)
+    await queue.clear()
+    await update.message.reply_text("🛑 Queue cleared")
 
 
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+async def receive_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await queue.push(update.message)
+    await update.message.reply_text("📥 Added to queue")
+
+
+# ======================
+# Dashboard server
+# ======================
+
+def run_dashboard():
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# ======================
+# Main
+# ======================
+
+async def main():
+    threading.Thread(target=run_dashboard, daemon=True).start()
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    await queue.start(upload_handler)
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("upload_channel", upload_channel))
-    app.add_handler(MessageHandler(filters.ALL, handle_file))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("pause", pause))
+    app.add_handler(CommandHandler("resume", resume))
+    app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(MessageHandler(filters.Document.ALL | filters.Video.ALL | filters.Audio.ALL, receive_file))
 
-    app.run_polling()
+    await app.run_polling()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

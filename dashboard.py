@@ -12,7 +12,7 @@ def bind_queue(q):
 
 @app.get("/")
 def home():
-    return {"message": "Telegram to Google Drive Bot Dashboard"}
+    return {"message": "Telegram → Google Drive Bot Dashboard"}
 
 
 @app.get("/stats")

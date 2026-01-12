@@ -41,6 +41,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def receive_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only process media messages
+    if not (update.message.document or update.message.video or update.message.photo or update.message.audio):
+        return  # ignore other messages
+
     await queue.push(update.message)
     await update.message.reply_text("📥 Added to upload queue")
 
@@ -112,10 +116,10 @@ def main():
     app_bot.add_handler(CommandHandler("cancel", cancel))
     app_bot.add_handler(CommandHandler("bulk", bulk))
 
-    # Correct uppercase filters for PTB v20.7
+    # Accept all messages (Option 2) but we filter inside receive_file
     app_bot.add_handler(
         MessageHandler(
-            filters.Document | filters.Video | filters.Photo | filters.Audio,
+            filters.ALL,
             receive_file
         )
     )

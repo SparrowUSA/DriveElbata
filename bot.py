@@ -7,18 +7,14 @@ from queue_manager import UploadQueue
 from telegram_fetch import fetch_single_file, fetch_from_channel
 from drive_upload import upload_to_drive
 
-# ------------------ Config ------------------
 TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 
 queue = UploadQueue(concurrency=3)
 
+
 # ------------------ Upload Worker ------------------
 async def upload_handler(item):
-    """
-    Handles uploading messages/files from queue to Google Drive.
-    item can be a Message object (single file) or tuple for bulk: (Message, (file_obj, filename))
-    """
     if isinstance(item, tuple):
         message, (file_obj, filename) = item
     else:
@@ -103,7 +99,6 @@ async def bulk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ------------------ Main ------------------
 def main():
-    # Build Telegram bot application
     app_bot = ApplicationBuilder().token(TOKEN).build()
 
     # Start queue worker in current asyncio loop
@@ -117,14 +112,15 @@ def main():
     app_bot.add_handler(CommandHandler("cancel", cancel))
     app_bot.add_handler(CommandHandler("bulk", bulk))
 
+    # Correct uppercase filters
     app_bot.add_handler(
         MessageHandler(
-            filters.document | filters.video | filters.photo | filters.audio,
+            filters.Document | filters.Video | filters.Photo | filters.Audio,
             receive_file
         )
     )
 
-    # Run bot polling (blocking, manages asyncio internally)
+    # Run polling
     app_bot.run_polling()
 
 

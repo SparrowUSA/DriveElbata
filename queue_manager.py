@@ -13,7 +13,6 @@ class UploadQueue:
         while True:
             item = await self.queue.get()
 
-            # pause handling
             while self.paused:
                 await asyncio.sleep(1)
 

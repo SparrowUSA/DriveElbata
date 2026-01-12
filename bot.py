@@ -7,14 +7,18 @@ from queue_manager import UploadQueue
 from telegram_fetch import fetch_single_file, fetch_from_channel
 from drive_upload import upload_to_drive
 
+# ------------------ Config ------------------
 TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 
 queue = UploadQueue(concurrency=3)
 
-
 # ------------------ Upload Worker ------------------
 async def upload_handler(item):
+    """
+    Handles uploading messages/files from queue to Google Drive.
+    item can be a Message object (single file) or tuple for bulk: (Message, (file_obj, filename))
+    """
     if isinstance(item, tuple):
         message, (file_obj, filename) = item
     else:
@@ -40,11 +44,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Send any file to upload, or use /bulk <channel_id> <count> to upload multiple files."
     )
 
-
 async def receive_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await queue.push(update.message)
     await update.message.reply_text("📥 Added to upload queue")
-
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -54,20 +56,17 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Paused: {queue.paused}"
     )
 
-
 async def pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     queue.pause()
     await update.message.reply_text("⏸ Queue paused")
 
-
 async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     queue.resume()
     await update.message.reply_text("▶ Queue resumed")
-
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -76,7 +75,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🛑 Queue cleared")
 
 
-# ------------------ Bulk Command ------------------
+# ------------------ Bulk Upload ------------------
 async def bulk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) != 2:
         await update.message.reply_text("Usage: /bulk <channel_id> <count>")
@@ -104,10 +103,10 @@ async def bulk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ------------------ Main ------------------
 def main():
-    # Build Telegram app
+    # Build Telegram bot application
     app_bot = ApplicationBuilder().token(TOKEN).build()
 
-    # Start queue workers on current event loop
+    # Start queue worker in current asyncio loop
     asyncio.get_event_loop().create_task(queue.start(upload_handler))
 
     # Register handlers
@@ -117,14 +116,15 @@ def main():
     app_bot.add_handler(CommandHandler("resume", resume))
     app_bot.add_handler(CommandHandler("cancel", cancel))
     app_bot.add_handler(CommandHandler("bulk", bulk))
+
     app_bot.add_handler(
         MessageHandler(
-            filters.Document.ALL | filters.Video.ALL | filters.Photo.ALL | filters.Audio.ALL,
+            filters.DOCUMENT | filters.VIDEO | filters.PHOTO | filters.AUDIO,
             receive_file
         )
     )
 
-    # Run polling (blocking, handles asyncio internally)
+    # Run bot polling (blocking, manages asyncio internally)
     app_bot.run_polling()
 
 

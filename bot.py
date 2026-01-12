@@ -14,9 +14,7 @@ queue = UploadQueue(concurrency=3)
 
 
 # ------------------ Upload Worker ------------------
-
 async def upload_handler(item):
-    # item can be Message (single) or tuple from bulk
     if isinstance(item, tuple):
         message, (file_obj, filename) = item
     else:
@@ -37,7 +35,6 @@ async def upload_handler(item):
 
 
 # ------------------ Telegram Handlers ------------------
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Send any file to upload, or use /bulk <channel_id> <count> to upload multiple files."
@@ -80,7 +77,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ------------------ Bulk Command ------------------
-
 async def bulk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) != 2:
         await update.message.reply_text("Usage: /bulk <channel_id> <count>")
@@ -107,14 +103,14 @@ async def bulk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ------------------ Main ------------------
-
 def main():
+    # Build Telegram app
     app_bot = ApplicationBuilder().token(TOKEN).build()
 
-    # start queue workers
+    # Start queue workers on current event loop
     asyncio.get_event_loop().create_task(queue.start(upload_handler))
 
-    # register handlers
+    # Register handlers
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("stats", stats))
     app_bot.add_handler(CommandHandler("pause", pause))
@@ -128,7 +124,7 @@ def main():
         )
     )
 
-    # run polling (blocking, handles asyncio loop internally)
+    # Run polling (blocking, handles asyncio internally)
     app_bot.run_polling()
 
 

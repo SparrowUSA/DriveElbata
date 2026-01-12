@@ -119,7 +119,7 @@ def main():
 
     app_bot.add_handler(
         MessageHandler(
-            filters.DOCUMENT | filters.VIDEO | filters.PHOTO | filters.AUDIO,
+            filters.document | filters.video | filters.photo | filters.audio,
             receive_file
         )
     )

@@ -1,33 +1,52 @@
 import os
 import asyncio
-import threading
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 from queue_manager import UploadQueue
 from telegram_fetch import fetch_single_file, fetch_from_channel
 from drive_upload import upload_to_drive
-from dashboard import app, bind_queue
-import uvicorn
 
 TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 
 queue = UploadQueue(concurrency=3)
-bind_queue(queue)
+
+
+# ------------------ Upload Worker ------------------
+
+async def upload_handler(item):
+    # item can be Message (single) or tuple from bulk
+    if isinstance(item, tuple):
+        message, (file_obj, filename) = item
+    else:
+        message = item
+        result = await fetch_single_file(message)
+        if not result:
+            await message.reply_text("⚠️ Unsupported file type, skipping.")
+            return
+        file_obj, filename = result
+
+    file_bytes = await file_obj.download_as_bytearray()
+    drive_link = upload_to_drive(file_bytes, filename)
+
+    if drive_link:
+        await message.reply_text(f"✅ Uploaded: {filename}\n🔗 {drive_link}")
+    else:
+        await message.reply_text(f"❌ Upload failed: {filename}")
 
 
 # ------------------ Telegram Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Send any file, or use /bulk <channel_id> <count> to bulk upload 1–1000 files."
+        "Send any file to upload, or use /bulk <channel_id> <count> to upload multiple files."
     )
 
 
 async def receive_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await queue.push(update.message)
-    await update.message.reply_text("📥 Added to queue")
+    await update.message.reply_text("📥 Added to upload queue")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -60,29 +79,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🛑 Queue cleared")
 
 
-# ------------------ Upload Worker ------------------
-
-async def upload_handler(item):
-    # item can be Message (single) or tuple from bulk
-    if isinstance(item, tuple):
-        message, (file_obj, filename) = item
-    else:
-        message = item
-        result = await fetch_single_file(message)
-        if not result:
-            await message.reply_text("⚠️ Unsupported file type, skipping.")
-            return
-        file_obj, filename = result
-
-    file_bytes = await file_obj.download_as_bytearray()
-    drive_link = upload_to_drive(file_bytes, filename)
-
-    if drive_link:
-        await message.reply_text(f"✅ Uploaded: {filename}\n🔗 {drive_link}")
-    else:
-        await message.reply_text(f"❌ Upload failed: {filename}")
-
-
 # ------------------ Bulk Command ------------------
 
 async def bulk(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,21 +106,15 @@ async def bulk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Added {len(media_items)} files to the queue")
 
 
-# ------------------ Dashboard ------------------
-
-def run_dashboard():
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
 # ------------------ Main ------------------
 
-async def main():
-    threading.Thread(target=run_dashboard, daemon=True).start()
-
+def main():
     app_bot = ApplicationBuilder().token(TOKEN).build()
 
-    await queue.start(upload_handler)
+    # start queue workers
+    asyncio.get_event_loop().create_task(queue.start(upload_handler))
 
+    # register handlers
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("stats", stats))
     app_bot.add_handler(CommandHandler("pause", pause))
@@ -132,11 +122,15 @@ async def main():
     app_bot.add_handler(CommandHandler("cancel", cancel))
     app_bot.add_handler(CommandHandler("bulk", bulk))
     app_bot.add_handler(
-        MessageHandler(filters.Document.ALL | filters.Video.ALL | filters.Photo.ALL | filters.Audio.ALL, receive_file)
+        MessageHandler(
+            filters.Document.ALL | filters.Video.ALL | filters.Photo.ALL | filters.Audio.ALL,
+            receive_file
+        )
     )
 
-    await app_bot.run_polling()
+    # run polling (blocking, handles asyncio loop internally)
+    app_bot.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

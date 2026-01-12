@@ -112,7 +112,7 @@ def main():
     app_bot.add_handler(CommandHandler("cancel", cancel))
     app_bot.add_handler(CommandHandler("bulk", bulk))
 
-    # Correct uppercase filters
+    # Correct uppercase filters for PTB v20.7
     app_bot.add_handler(
         MessageHandler(
             filters.Document | filters.Video | filters.Photo | filters.Audio,
